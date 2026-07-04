@@ -5,7 +5,7 @@
 
 # Add functionality to source visualization path var from the Python scripts?
 
-VISUALIZATION_PATH = "env/visualization"
+VISUALIZATION_PATH="env/visualization"
 
 if [ ! -d "$VISUALIZATION_PATH" ]; then
     mkdir -p "$VISUALIZATION_PATH"
