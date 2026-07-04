@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh
+source /opt/esp-idf/${ESP_IDF_VERSION}/esp-idf/tools/activate_idf_${ESP_IDF_VERSION}.sh
 
 set -euo pipefail
 
