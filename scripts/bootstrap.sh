@@ -1,4 +1,4 @@
-\#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 bash scripts/install\_all.sh
 echo "Installed dependencies. Copying web templates for dashboard."
