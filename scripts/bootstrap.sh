@@ -4,8 +4,12 @@ bash scripts/install_all.sh
 echo "Installed dependencies. Copying web templates for dashboard."
 bash scripts/copy-web-templates.sh
 
+# Export vars to set ESP-IDF verison and installation path
+export ESP_PATH="/opt/esp-idf"
+export ESP_IDF_VERSION="v6.0.2"
+
 # Install the ESP-IDF if it is not found locally
-if [ ! -d ~/.esspressif ]; then
+if [ ! -d $ESP_PATH/$ESP_IDF_VERSION  ]; then
     echo "ESP-IDF not found, installing the ESP-IDF before building ESP32 firmware"
     bash scripts/esp-idf/esp-idf-setup.sh
 else
