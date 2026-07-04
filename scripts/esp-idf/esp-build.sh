@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
-source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh
+# Source the ESP-IDF venv
+echo "Sourcing ESP-IDF version ${ESP_IDF_VERSION}"
+# source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh
+# bash -c 'source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh && idf.py build' bash
+# eval "$(sh ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh -e)"
 
 set -euo pipefail
 
@@ -23,9 +27,16 @@ cd "third_party/esp32-csi-toolkit/passive" # For Passive CSI collection (Used as
 
 # Configure the connection settings for the ESP-IDF
 
-echo "Configuring ESP-IDF to connect to ESP32"
-idf.py menuconfig
+bash -c '
+    source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh
+    
+    echo "Configuring ESP-IDF to connect to ESP32"
+    
+    idf.py menuconfig
+    idf.py set-target esp32
 
-# Build the firmware
-echo "Building firmware"
-idf.py build
+    # Build the firmware
+    echo "Building firmware"
+    idf.py build
+
+' bash
