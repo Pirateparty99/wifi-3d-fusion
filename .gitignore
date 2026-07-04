@@ -43,3 +43,6 @@ scripts/setup_whofi_multiap.sh
 scripts/wifi3d_auto.sh
 scripts/setup_whofi_reid.sh
 src/pipeline/realtime_viewer_hacker.py
+
+# ESP-related files
+eim_config.toml
