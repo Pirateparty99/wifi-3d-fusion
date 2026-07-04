@@ -14,4 +14,4 @@ else
     echo "Already exists: $VISUALIZATION_PATH"
 fi
 
-copy templates/index.html $VISUALIZATION_PATH/index.html
+cp templates/index.html $VISUALIZATION_PATH/index.html
