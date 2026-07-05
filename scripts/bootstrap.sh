@@ -6,7 +6,9 @@ bash scripts/copy-web-templates.sh
 
 # Export vars to set ESP-IDF verison and installation path
 export ESP_PATH="/opt/esp-idf"
-export ESP_IDF_VERSION="v6.0.2"
+
+# ESP-IDF version 4.3 required by the ESP32 CSI Toolkit repo
+export ESP_IDF_VERSION="v4.3"
 
 # Install the ESP-IDF if it is not found locally
 if [ ! -d $ESP_PATH/$ESP_IDF_VERSION  ]; then
