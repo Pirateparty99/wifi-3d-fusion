@@ -54,7 +54,7 @@ print_build_success() {
 export -f print_build_success
 
 activate_eim_env() {
-  log "Activating the ESP-IDF ${ESP_IDF_VERSION} virtual environment"
+  echo "Activating the ESP-IDF ${ESP_IDF_VERSION} virtual environment"
 
   local activate_script="$HOME/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh"
   if [ ! -f "$activate_script" ]; then
@@ -100,7 +100,7 @@ activate_legacy_env() {
   local idf_final_dir="$1"
   local export_script="${idf_final_dir}/export.sh"
 
-  log "Activating the ESP-IDF ${ESP_IDF_VERSION} virtual environment (legacy export.sh)"
+  echo "Activating the ESP-IDF ${ESP_IDF_VERSION} virtual environment (legacy export.sh)"
 
   if [ ! -f "$export_script" ]; then
     err "Legacy export.sh not found: $export_script"
