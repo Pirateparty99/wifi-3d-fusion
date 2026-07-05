@@ -13,17 +13,19 @@ sudo bash ./scripts/esp-idf/install-eim.sh
 #Install the ESP-IDF with EIM
 echo "Install the ESP-IDF with EIM"
 
-sudo eim install -i ${ESP_IDF_VERSION} -p ${ESP_PATH}
+eim install -i ${ESP_IDF_VERSION} -p /tmp/esp-idf
+
+mv /tmp//esp-idf/${ESP_IDF_VERSION} ${ESP_PATH}
 
 # Set ownership of ESP-IDF installation dir to current user
-sudo chown -R ${USER} ${ESP_PATH}/${ESP_IDF_VERSION}
+# sudo chown -R ${USER} ${ESP_PATH}/${ESP_IDF_VERSION}
 
 # Add execute permissions to ESP-IDF installation dix 
 sudo chmod -R +x scripts/esp-idf/
 
 # Copy the espressif folder from root's home to the current user's home
 echo "Copying espressif folder to ${USER}'s home"
-sudo cp -r /root/.espressif/ ~/
+# sudo cp -r /root/.espressif/ ~/
 
 # Activate ESP-IDF venv
 echo "Activating the ESP-IDF version ${ESP_IDF_VERSION} virtual environment"
