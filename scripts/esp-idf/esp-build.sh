@@ -53,10 +53,28 @@ print_build_success() {
 }
 export -f print_build_success
 
+activate_eim_env() {
+  log "Activating the ESP-IDF ${ESP_IDF_VERSION} virtual environment"
+
+  local activate_script="$HOME/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh"
+  if [ ! -f "$activate_script" ]; then
+    err "Activation script not found: $activate_script"
+    exit 1
+  fi
+
+  bash -c '
+    source "$1"
+    export PATH="$(printf "%s" "$PATH" | sed -E "s#([^/])\.espressif/#\1/.espressif/#g")"
+    idf.py --version
+  ' bash "$activate_script"
+}
+
 # EIM-installed ESP-IDF build function
 eim-esp-build() {
     bash -c '
         set -euo pipefail
+
+        activate_eim_env
 
         source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh
 
@@ -71,6 +89,24 @@ eim-esp-build() {
 
         print_build_success
     ' bash
+}
+
+# Sources the legacy export.sh script and runs a smoke test.
+activate_legacy_env() {
+  local idf_final_dir="$1"
+  local export_script="${idf_final_dir}/export.sh"
+
+  log "Activating the ESP-IDF ${ESP_IDF_VERSION} virtual environment (legacy export.sh)"
+
+  if [ ! -f "$export_script" ]; then
+    err "Legacy export.sh not found: $export_script"
+    exit 1
+  fi
+
+  bash -c '
+    source "$1"
+    idf.py --version
+  ' bash "$export_script"
 }
 
 # Legacy (<5.0) ESP-IDF build function
@@ -96,6 +132,11 @@ legacy-esp-build () {
 
     bash -c '
         set -euo pipefail
+
+        # Source the legacy ESP-IDF venv
+
+        idf_final_dir="${ESP_PATH}/${ESP_IDF_VERSION}"
+        activate_legacy_env "$idf_final_dir"
 
         source "${IDF_PATH}/export.sh"
 
