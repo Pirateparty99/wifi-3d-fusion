@@ -7,7 +7,14 @@ set -euo pipefail
 #           every supported target.
 ESP_TARGET="${ESP_TARGET:-all}"
 
-log() { printf '\033[1;34m[esp-build]\033[0m %s\n' "$1"; }
+# Optional: LEGACY_PYTHON_BIN — path/name of the Python interpreter to use
+#           for the legacy (<5.0) install.sh flow. Defaults to "python3"
+#           (whatever that resolves to on PATH already). Old ESP-IDF
+#           versions pin dependency versions from their era and often fail
+#           to build under modern Python (e.g. 3.12 removed distutils,
+#           which many old pinned packages' setup.py relies on) — set this
+#           to an older interpreter (e.g. "python3.9") to avoid that.
+LEGACY_PYTHON_BIN="${LEGACY_PYTHON_BIN:-python3}"
 err() { printf '\033[1;31m[esp-build]\033[0m %s\n' "$1" >&2; }
 
 # --- Decide eim (>=5.0) vs legacy (<5.0) install path -----------------------
@@ -27,14 +34,13 @@ fi
 # Add execute permissions to ESP-IDF installation scripts
 sudo chmod -R +x scripts/esp-idf/
 
-# Create ESP-IDF installation directory
-sudo mkdir -p "${ESP_PATH}/${ESP_IDF_VERSION}"
-
-# `sudo mkdir` leaves this owned by root. The modern (eim) branch below
-# doesn't care, since eim clones into /tmp/esp-idf and we chown after the
-# fact — but the legacy branch clones directly into this directory as the
-# current (unprivileged) user, so it needs to be writable now.
-sudo chown -R "${USER}:${USER}" "${ESP_PATH}"
+# Ensure the base install directory exists. We deliberately do NOT create
+# ESP_PATH/${ESP_IDF_VERSION} here — both branches build into a /tmp
+# directory first (owned by the current user throughout, avoiding any
+# root-owned-directory permission clashes with unprivileged git/pip/etc.),
+# then copy the finished result into ESP_PATH and fix ownership at the end.
+sudo mkdir -p "${ESP_PATH}"
+sudo chown "${USER}:${USER}" "${ESP_PATH}"
 
 if [ "$idf_major" -ge 5 ]; then
   # ------------------------------------------------------------------------
@@ -48,9 +54,12 @@ if [ "$idf_major" -ge 5 ]; then
   log "Installing ESP-IDF ${ESP_IDF_VERSION} with EIM"
   eim install -i "${ESP_IDF_VERSION}" -p /tmp/esp-idf -t "${ESP_TARGET}"
 
-  sudo mv "/tmp/esp-idf/${ESP_IDF_VERSION}" "${ESP_PATH}"
+  log "Copying installed ESP-IDF into ${ESP_PATH}"
+  sudo cp -r "/tmp/esp-idf/${ESP_IDF_VERSION}" "${ESP_PATH}/${ESP_IDF_VERSION}"
+  rm -rf "/tmp/esp-idf/${ESP_IDF_VERSION}"
 
-  # Set ownership of ESP-IDF installation dir to current user
+  # Set ownership of ESP-IDF installation dir to current user, now that
+  # the copy is complete
   sudo chown -R "${USER}:${USER}" "${ESP_PATH}/${ESP_IDF_VERSION}"
 
   # Re-apply execute permissions after chown
@@ -92,28 +101,58 @@ else
   # ------------------------------------------------------------------------
   log "ESP-IDF ${ESP_IDF_VERSION} < v5.0 — EIM does not support this version; using legacy install (target: ${ESP_TARGET})"
 
-  IDF_CLONE_DIR="${ESP_PATH}/${ESP_IDF_VERSION}"
+  IDF_TMP_DIR="/tmp/esp-idf-legacy/${ESP_IDF_VERSION}"
+  IDF_FINAL_DIR="${ESP_PATH}/${ESP_IDF_VERSION}"
 
-  if [ -d "${IDF_CLONE_DIR}/.git" ]; then
-    log "Existing clone found at ${IDF_CLONE_DIR}, skipping clone"
+  mkdir -p "$(dirname "$IDF_TMP_DIR")"
+
+  if [ -d "${IDF_TMP_DIR}/.git" ]; then
+    log "Existing clone found at ${IDF_TMP_DIR}, skipping clone"
   else
     log "Cloning ESP-IDF ${ESP_IDF_VERSION}"
     git clone -b "${ESP_IDF_VERSION}" --recursive \
-      https://github.com/espressif/esp-idf.git "${IDF_CLONE_DIR}"
+      https://github.com/espressif/esp-idf.git "${IDF_TMP_DIR}"
   fi
 
-  log "Running legacy install.sh"
+  log "Running legacy install.sh (python: ${LEGACY_PYTHON_BIN})"
   (
-    cd "${IDF_CLONE_DIR}"
+    cd "${IDF_TMP_DIR}"
+
+    # install.sh detects its interpreter by running `which python3`/`which
+    # python` — there's no clean env-var override for this in old ESP-IDF
+    # versions. So if a specific interpreter was requested, build a small
+    # shim directory with python3/python symlinks pointing at it, and put
+    # that at the front of PATH for just this command.
+    if [ "${LEGACY_PYTHON_BIN}" != "python3" ]; then
+      resolved_python="$(command -v "${LEGACY_PYTHON_BIN}")" || {
+        err "LEGACY_PYTHON_BIN '${LEGACY_PYTHON_BIN}' not found on PATH"
+        exit 1
+      }
+      shim_dir="$(mktemp -d)"
+      ln -s "${resolved_python}" "${shim_dir}/python3"
+      ln -s "${resolved_python}" "${shim_dir}/python"
+      export PATH="${shim_dir}:${PATH}"
+      log "Using ${resolved_python} for install.sh (via PATH shim)"
+    fi
+
     ./install.sh "${ESP_TARGET}"
+
+    if [ -n "${shim_dir:-}" ]; then
+      rm -rf "${shim_dir}"
+    fi
   )
 
-  # Set ownership of ESP-IDF installation dir to current user
-  sudo chown -R "${USER}:${USER}" "${ESP_PATH}/${ESP_IDF_VERSION}"
+  log "Copying installed ESP-IDF into ${ESP_PATH}"
+  sudo cp -r "${IDF_TMP_DIR}" "${IDF_FINAL_DIR}"
+  rm -rf "${IDF_TMP_DIR}"
+
+  # Set ownership of ESP-IDF installation dir to current user, now that
+  # the copy is complete
+  sudo chown -R "${USER}:${USER}" "${IDF_FINAL_DIR}"
 
   log "Activating the ESP-IDF ${ESP_IDF_VERSION} virtual environment (legacy export.sh)"
 
-  EXPORT_SCRIPT="${IDF_CLONE_DIR}/export.sh"
+  EXPORT_SCRIPT="${IDF_FINAL_DIR}/export.sh"
   if [ ! -f "$EXPORT_SCRIPT" ]; then
     err "Legacy export.sh not found: $EXPORT_SCRIPT"
     exit 1

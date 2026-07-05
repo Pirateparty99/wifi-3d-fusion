@@ -10,6 +10,9 @@ export ESP_PATH="/opt/esp-idf"
 # ESP-IDF version 4.3 required by the ESP32 CSI Toolkit repo
 export ESP_IDF_VERSION="v4.3"
 
+# Set the Python venv version to one compatible for the specific ESP-IDF version (ex: Python 3.9 for ESP-IDF 4.3)
+export LEGACY_PYTHON_BIN=python3.9 
+
 # Set the board target for installing the board-specific toolchain(s) with ESP-IDF
 export ESP_TARGET=esp32,esp32c6  # multiple targets
 
