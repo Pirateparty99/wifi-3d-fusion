@@ -2,6 +2,10 @@
 set -euo pipefail
 
 # Requires: ESP_PATH, ESP_IDF_VERSION (e.g. "v6.0.2" or "v4.3") to be set in the environment.
+# Optional: ESP_TARGET (e.g. "esp32", "esp32,esp32s3") — chip target(s) to install
+#           tools for. Defaults to "all" if unset, which installs tools for
+#           every supported target.
+ESP_TARGET="${ESP_TARGET:-all}"
 
 log() { printf '\033[1;34m[esp-build]\033[0m %s\n' "$1"; }
 err() { printf '\033[1;31m[esp-build]\033[0m %s\n' "$1" >&2; }
@@ -36,13 +40,13 @@ if [ "$idf_major" -ge 5 ]; then
   # ------------------------------------------------------------------------
   # Modern path (>=5.0): install via EIM
   # ------------------------------------------------------------------------
-  log "ESP-IDF ${ESP_IDF_VERSION} >= v5.0 — installing via EIM"
+  log "ESP-IDF ${ESP_IDF_VERSION} >= v5.0 — installing via EIM (target: ${ESP_TARGET})"
 
   log "Installing EIM"
   sudo bash ./scripts/esp-idf/install-eim.sh
 
   log "Installing ESP-IDF ${ESP_IDF_VERSION} with EIM"
-  eim install -i "${ESP_IDF_VERSION}" -p /tmp/esp-idf
+  eim install -i "${ESP_IDF_VERSION}" -p /tmp/esp-idf -t "${ESP_TARGET}"
 
   sudo mv "/tmp/esp-idf/${ESP_IDF_VERSION}" "${ESP_PATH}"
 
@@ -86,7 +90,7 @@ else
   # Legacy path (<5.0): eim is not supported for this version, so clone and
   # bootstrap ESP-IDF directly with its own install.sh / export.sh scripts.
   # ------------------------------------------------------------------------
-  log "ESP-IDF ${ESP_IDF_VERSION} < v5.0 — EIM does not support this version; using legacy install"
+  log "ESP-IDF ${ESP_IDF_VERSION} < v5.0 — EIM does not support this version; using legacy install (target: ${ESP_TARGET})"
 
   IDF_CLONE_DIR="${ESP_PATH}/${ESP_IDF_VERSION}"
 
@@ -101,7 +105,7 @@ else
   log "Running legacy install.sh"
   (
     cd "${IDF_CLONE_DIR}"
-    ./install.sh
+    ./install.sh "${ESP_TARGET}"
   )
 
   # Set ownership of ESP-IDF installation dir to current user

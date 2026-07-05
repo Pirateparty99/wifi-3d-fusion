@@ -10,6 +10,10 @@ export ESP_PATH="/opt/esp-idf"
 # ESP-IDF version 4.3 required by the ESP32 CSI Toolkit repo
 export ESP_IDF_VERSION="v4.3"
 
+# Set the board target for installing the board-specific toolchain(s) with ESP-IDF
+export ESP_TARGET=esp32,esp32c6  # multiple targets
+
+
 # Install the ESP-IDF if it is not found locally
 if [ ! -d $ESP_PATH/$ESP_IDF_VERSION  ]; then
     echo "ESP-IDF not found, installing the ESP-IDF before building ESP32 firmware"
