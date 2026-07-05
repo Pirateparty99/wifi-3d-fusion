@@ -2,9 +2,62 @@
 
 err() { printf '\033[1;31m[esp-build]\033[0m %s\n' "$1" >&2; }
 
+# Prints a build-success message and how to flash the just-built firmware.
+# Exported so it's callable from inside the bash -c subshells below (a
+# plain function definition wouldn't be visible to a child bash process
+# otherwise).
+print_build_success() {
+    echo ""
+    echo "======================================================"
+    echo "Build successful!"
+    echo "======================================================"
+    echo ""
+    echo "Project directory: $(pwd)"
+    echo ""
+
+    local ports port uname_s example_port
+    ports="$(ls /dev/ttyUSB* /dev/ttyACM* /dev/cu.usbserial-* /dev/cu.SLAB_USBtoUART* 2>/dev/null || true)"
+    uname_s="$(uname -s 2>/dev/null || echo unknown)"
+
+    if [ -n "$ports" ]; then
+        port="$(echo "$ports" | head -n1)"
+        echo "Detected device on: $port"
+        if [ "$(echo "$ports" | wc -l)" -gt 1 ]; then
+            echo "(Other candidates also found — using the first. Full list:)"
+            echo "$ports" | sed 's/^/  /'
+        fi
+        echo ""
+        echo "To flash this build, run:"
+        echo "  idf.py -p $port flash"
+        echo ""
+        echo "To flash and open the serial monitor in one step, run:"
+        echo "  idf.py -p $port flash monitor"
+    else
+        echo "No device detected on any serial port."
+        echo "Plug in your ESP32 and check again with:"
+        if [ "$uname_s" = "Darwin" ]; then
+            example_port="/dev/cu.usbserial-1420"
+            echo "  ls /dev/cu.*"
+        else
+            example_port="/dev/ttyUSB0"
+            echo "  ls /dev/ttyUSB* /dev/ttyACM*"
+        fi
+        echo ""
+        echo "Once connected, it will typically show up as something like:"
+        echo "  $example_port"
+        echo ""
+        echo "Then flash with:"
+        echo "  idf.py -p $example_port flash"
+    fi
+    echo ""
+}
+export -f print_build_success
+
 # EIM-installed ESP-IDF build function
 eim-esp-build() {
     bash -c '
+        set -euo pipefail
+
         source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh
 
         echo "Configuring ESP-IDF to connect to ESP32"
@@ -16,12 +69,15 @@ eim-esp-build() {
         echo "Building firmware"
         idf.py build
 
+        print_build_success
     ' bash
 }
 
 # Legacy (<5.0) ESP-IDF build function
 legacy-esp-build () {
     bash -c '
+        set -euo pipefail
+
         source "${IDF_PATH}/export.sh"
 
         echo "Configuring ESP-IDF to connect to ESP32"
@@ -33,6 +89,7 @@ legacy-esp-build () {
         echo "Building firmware"
         idf.py build
 
+        print_build_success
     ' bash
 }
 
