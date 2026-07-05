@@ -15,7 +15,7 @@ echo "Install the ESP-IDF with EIM"
 
 eim install -i ${ESP_IDF_VERSION} -p /tmp/esp-idf
 
-mv /tmp//esp-idf/${ESP_IDF_VERSION} ${ESP_PATH}
+sudo mv /tmp//esp-idf/${ESP_IDF_VERSION} ${ESP_PATH}
 
 # Set ownership of ESP-IDF installation dir to current user
 # sudo chown -R ${USER} ${ESP_PATH}/${ESP_IDF_VERSION}
