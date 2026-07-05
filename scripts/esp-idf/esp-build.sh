@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
 
+# EIM-installed ESP-IDF build function
+eim-esp-build() {
+    bash -c '
+        source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh
+        
+        echo "Configuring ESP-IDF to connect to ESP32"
+        
+        idf.py menuconfig
+        idf.py set-target esp32
+
+        # Build the firmware
+        echo "Building firmware"
+        idf.py build
+
+    ' bash
+}
+
 # Source the ESP-IDF venv
 echo "Sourcing ESP-IDF version ${ESP_IDF_VERSION}"
 # source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh
@@ -27,16 +44,6 @@ cd "third_party/esp32-csi-toolkit/passive" # For Passive CSI collection (Used as
 
 # Configure the connection settings for the ESP-IDF
 
-bash -c '
-    source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh
-    
-    echo "Configuring ESP-IDF to connect to ESP32"
-    
-    idf.py menuconfig
-    idf.py set-target esp32
+# Select version of 
 
-    # Build the firmware
-    echo "Building firmware"
-    idf.py build
-
-' bash
+eim-esp-build

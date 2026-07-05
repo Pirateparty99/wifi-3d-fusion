@@ -6,17 +6,85 @@ set -euo pipefail
 #           tools for. Defaults to "all" if unset, which installs tools for
 #           every supported target.
 # Optional: LEGACY_PYTHON_BIN — path/name of the Python interpreter to use
-#           for the legacy (<5.0) install.sh flow. Defaults to "python3"
-#           (whatever that resolves to on PATH already). Old ESP-IDF
-#           versions pin dependency versions from their era and often fail
-#           to build under modern Python (e.g. 3.12 removed distutils,
-#           which many old pinned packages' setup.py relies on) — set this
-#           to an older interpreter (e.g. "python3.9") to avoid that.
+#           for the legacy (<5.0) install.sh flow. Defaults to "python3.9",
+#           since old ESP-IDF versions pin dependency versions from their
+#           era and often fail to build under modern Python (e.g. 3.12
+#           removed distutils, which many old pinned packages' setup.py
+#           relies on). If it isn't already installed, the script will try
+#           to install it via the OS package manager.
 ESP_TARGET="${ESP_TARGET:-all}"
-LEGACY_PYTHON_BIN="${LEGACY_PYTHON_BIN:-python3}"
+LEGACY_PYTHON_BIN="${LEGACY_PYTHON_BIN:-python3.9}"
 
 log() { printf '\033[1;34m[esp-build]\033[0m %s\n' "$1"; }
 err() { printf '\033[1;31m[esp-build]\033[0m %s\n' "$1" >&2; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Ensures LEGACY_PYTHON_BIN is installed, installing it via the detected OS
+# package manager if it's missing. Currently only knows how to install
+# python3.9 specifically (apt: deadsnakes PPA, dnf: package name
+# python3.9, brew: python@3.9) — if LEGACY_PYTHON_BIN is set to something
+# else and it's missing, this just errors out with instructions rather
+# than guessing.
+ensure_legacy_python() {
+  if have "${LEGACY_PYTHON_BIN}"; then
+    log "${LEGACY_PYTHON_BIN} already installed: $(command -v "${LEGACY_PYTHON_BIN}")"
+    return 0
+  fi
+
+  if [ "${LEGACY_PYTHON_BIN}" != "python3.9" ]; then
+    err "LEGACY_PYTHON_BIN '${LEGACY_PYTHON_BIN}' not found on PATH, and auto-install"
+    err "is only implemented for python3.9. Install '${LEGACY_PYTHON_BIN}' manually and re-run."
+    exit 1
+  fi
+
+  log "python3.9 not found — attempting to install it"
+
+  local uname_s
+  uname_s="$(uname -s 2>/dev/null || echo unknown)"
+
+  case "$uname_s" in
+    Linux)
+      if have apt-get || have apt; then
+        log "Installing python3.9 via APT (deadsnakes PPA)"
+        sudo apt-get update
+        sudo apt-get install -y software-properties-common
+        sudo add-apt-repository -y ppa:deadsnakes/ppa
+        sudo apt-get update
+        sudo apt-get install -y python3.9 python3.9-venv python3.9-distutils
+      elif have dnf; then
+        log "Installing python3.9 via DNF"
+        sudo dnf install -y python3.9
+      elif have pacman; then
+        err "Auto-install of python3.9 via pacman is not supported (not in official repos)."
+        err "Install it manually, e.g. via an AUR helper (python39), and re-run."
+        exit 1
+      else
+        err "No supported package manager found (apt, dnf, or pacman)."
+        exit 1
+      fi
+      ;;
+    Darwin)
+      if have brew; then
+        log "Installing python3.9 via Homebrew"
+        brew install python@3.9
+      else
+        err "Homebrew not found. Install it from https://brew.sh and re-run,"
+        err "or install python3.9 manually."
+        exit 1
+      fi
+      ;;
+    *)
+      err "Unsupported or undetected OS: $uname_s. Install python3.9 manually and re-run."
+      exit 1
+      ;;
+  esac
+
+  if ! have "${LEGACY_PYTHON_BIN}"; then
+    err "python3.9 installation appeared to succeed, but '${LEGACY_PYTHON_BIN}' still isn't on PATH."
+    exit 1
+  fi
+  log "python3.9 installed: $(command -v "${LEGACY_PYTHON_BIN}")"
+}
 
 # Parses the major version number out of ESP_IDF_VERSION (handles "v6.0.2",
 # "6.0.2", "v5", etc.) and prints it. Exits with an error if unparseable.
@@ -105,6 +173,8 @@ activate_eim_env() {
 # ---------------------------------------------------------------------------
 install_with_legacy() {
   log "ESP-IDF ${ESP_IDF_VERSION} < v5.0 — EIM does not support this version; using legacy install (target: ${ESP_TARGET})"
+
+  ensure_legacy_python
 
   local idf_tmp_dir="/tmp/esp-idf-legacy/${ESP_IDF_VERSION}"
   local idf_final_dir="${ESP_PATH}/${ESP_IDF_VERSION}"
