@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 
+err() { printf '\033[1;31m[esp-build]\033[0m %s\n' "$1" >&2; }
+
 # EIM-installed ESP-IDF build function
 eim-esp-build() {
     bash -c '
         source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh
-        
+
         echo "Configuring ESP-IDF to connect to ESP32"
-        
+
         idf.py menuconfig
         idf.py set-target esp32
 
@@ -17,8 +19,21 @@ eim-esp-build() {
     ' bash
 }
 
+# Legacy (<5.0) ESP-IDF build function
 legacy-esp-build () {
-    source 
+    bash -c '
+        source "${IDF_PATH}/export.sh"
+
+        echo "Configuring ESP-IDF to connect to ESP32"
+
+        idf.py menuconfig
+        idf.py set-target esp32
+
+        # Build the firmware
+        echo "Building firmware"
+        idf.py build
+
+    ' bash
 }
 
 # Function for grabbing the ESP-IDF major release version for version check
@@ -71,3 +86,5 @@ main() {
         legacy-esp-build
     fi
 }
+
+main "$@"
