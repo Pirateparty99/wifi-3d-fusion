@@ -71,6 +71,10 @@ activate_eim_env() {
 
 # EIM-installed ESP-IDF build function
 eim-esp-build() {
+
+    # Export the venv activation function to allow subshell to call it
+    export -f activate_eim_env
+
     bash -c '
         set -euo pipefail
 
@@ -129,6 +133,9 @@ legacy-esp-build () {
         err "Check that ESP_PATH and ESP_IDF_VERSION are set correctly, or set IDF_PATH directly."
         exit 1
     fi
+
+    # Export the venv activation function to allow subshell to call it
+    export -f activate_legacy_env
 
     bash -c '
         set -euo pipefail
