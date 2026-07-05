@@ -17,6 +17,10 @@ eim-esp-build() {
     ' bash
 }
 
+legacy-esp-build () {
+    source 
+}
+
 # Function for grabbing the ESP-IDF major release version for version check
 get_idf_major_version() {
   local version="$1" major
@@ -39,11 +43,12 @@ main() {
 
     set -euo pipefail
 
+    local idf_major
+    idf_major="$(get_idf_major_version "${ESP_IDF_VERSION}")"
+
     # ESP-CSI Toolkit firmware build script
 
-    # Clone repo
-
-
+    # Clone repo if it does not exist
     if [ ! -d "third_party/esp32-csi-toolkit" ]; then
 
         echo "Cloning the ESP32 CSI Toolkit repo"
@@ -58,7 +63,11 @@ main() {
 
     # Configure the connection settings for the ESP-IDF
 
-    # Select version of 
+    # Run ESP build based on installed ESP-IDF version
 
-    eim-esp-build
+    if [ "$idf_major" -ge 5 ]; then
+        eim-esp-build
+    else
+        legacy-esp-build
+    fi
 }
