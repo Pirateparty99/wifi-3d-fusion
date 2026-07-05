@@ -5,8 +5,6 @@ set -euo pipefail
 # Optional: ESP_TARGET (e.g. "esp32", "esp32,esp32s3") — chip target(s) to install
 #           tools for. Defaults to "all" if unset, which installs tools for
 #           every supported target.
-ESP_TARGET="${ESP_TARGET:-all}"
-
 # Optional: LEGACY_PYTHON_BIN — path/name of the Python interpreter to use
 #           for the legacy (<5.0) install.sh flow. Defaults to "python3"
 #           (whatever that resolves to on PATH already). Old ESP-IDF
@@ -14,38 +12,39 @@ ESP_TARGET="${ESP_TARGET:-all}"
 #           to build under modern Python (e.g. 3.12 removed distutils,
 #           which many old pinned packages' setup.py relies on) — set this
 #           to an older interpreter (e.g. "python3.9") to avoid that.
+ESP_TARGET="${ESP_TARGET:-all}"
 LEGACY_PYTHON_BIN="${LEGACY_PYTHON_BIN:-python3}"
+
+log() { printf '\033[1;34m[esp-build]\033[0m %s\n' "$1"; }
 err() { printf '\033[1;31m[esp-build]\033[0m %s\n' "$1" >&2; }
 
-# --- Decide eim (>=5.0) vs legacy (<5.0) install path -----------------------
-# eim's requirements-installer assumes the tools/requirements/*.txt layout,
-# which ESP-IDF only introduced around v5.0. Pre-5.0 versions only have a
-# flat tools/requirements.txt, so `eim install` fails for them with:
-#   "Could not open requirements file: ''"
-# We therefore only use eim for >=5.0, and fall back to the legacy
-# install.sh/export.sh flow for anything older.
-idf_major="${ESP_IDF_VERSION#v}"
-idf_major="${idf_major%%.*}"
-if ! [[ "$idf_major" =~ ^[0-9]+$ ]]; then
-  err "Could not parse major version from ESP_IDF_VERSION='${ESP_IDF_VERSION}'"
-  exit 1
-fi
+# Parses the major version number out of ESP_IDF_VERSION (handles "v6.0.2",
+# "6.0.2", "v5", etc.) and prints it. Exits with an error if unparseable.
+get_idf_major_version() {
+  local version="$1" major
+  major="${version#v}"
+  major="${major%%.*}"
+  if ! [[ "$major" =~ ^[0-9]+$ ]]; then
+    err "Could not parse major version from ESP_IDF_VERSION='${version}'"
+    exit 1
+  fi
+  echo "$major"
+}
 
-# Add execute permissions to ESP-IDF installation scripts
-sudo chmod -R +x scripts/esp-idf/
+# Ensures the base ESP_PATH directory exists and is owned by the current
+# user. Deliberately does NOT create the version-specific subdirectory —
+# both install functions build into /tmp first (always user-writable,
+# avoiding root-owned-directory permission clashes with unprivileged
+# git/pip/etc.), then copy the finished result into ESP_PATH at the end.
+ensure_base_dir() {
+  sudo mkdir -p "${ESP_PATH}"
+  sudo chown "${USER}:${USER}" "${ESP_PATH}"
+}
 
-# Ensure the base install directory exists. We deliberately do NOT create
-# ESP_PATH/${ESP_IDF_VERSION} here — both branches build into a /tmp
-# directory first (owned by the current user throughout, avoiding any
-# root-owned-directory permission clashes with unprivileged git/pip/etc.),
-# then copy the finished result into ESP_PATH and fix ownership at the end.
-sudo mkdir -p "${ESP_PATH}"
-sudo chown "${USER}:${USER}" "${ESP_PATH}"
-
-if [ "$idf_major" -ge 5 ]; then
-  # ------------------------------------------------------------------------
-  # Modern path (>=5.0): install via EIM
-  # ------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Modern path (>=5.0): install via EIM
+# ---------------------------------------------------------------------------
+install_with_eim() {
   log "ESP-IDF ${ESP_IDF_VERSION} >= v5.0 — installing via EIM (target: ${ESP_TARGET})"
 
   log "Installing EIM"
@@ -69,60 +68,84 @@ if [ "$idf_major" -ge 5 ]; then
   # echo "Copying espressif folder to ${USER}'s home"
   # sudo cp -r /root/.espressif/ ~/
 
+  activate_eim_env
+}
+
+# Sources the eim-generated activate_idf_*.sh script and runs a smoke test.
+# NOTE on the two workarounds below:
+# 1. `bash -c '...' bash` fakes $0 to "bash" so the script's own
+#    is_sourced() check (which only allows $0 to look like a shell name)
+#    passes correctly, even though we're sourcing it from inside this
+#    non-shell-named wrapper script.
+# 2. The sed fixes a known typo in the generated PATH entries, which
+#    concatenate "$HOME" + ".espressif" without a "/" in between
+#    (e.g. ".../user1.espressif/tools/..." instead of
+#    ".../user1/.espressif/tools/...").
+# Keep any idf.py/build commands INSIDE this same bash -c block --
+# the PATH/function setup only exists within this subshell.
+activate_eim_env() {
   log "Activating the ESP-IDF ${ESP_IDF_VERSION} virtual environment"
 
-  ACTIVATE_SCRIPT="$HOME/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh"
-  if [ ! -f "$ACTIVATE_SCRIPT" ]; then
-    err "Activation script not found: $ACTIVATE_SCRIPT"
+  local activate_script="$HOME/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh"
+  if [ ! -f "$activate_script" ]; then
+    err "Activation script not found: $activate_script"
     exit 1
   fi
 
-  # NOTE on the two workarounds below:
-  # 1. `bash -c '...' bash` fakes $0 to "bash" so the script's own
-  #    is_sourced() check (which only allows $0 to look like a shell name)
-  #    passes correctly, even though we're sourcing it from inside this
-  #    non-shell-named wrapper script.
-  # 2. The sed fixes a known typo in the generated PATH entries, which
-  #    concatenate "$HOME" + ".espressif" without a "/" in between
-  #    (e.g. ".../user1.espressif/tools/..." instead of
-  #    ".../user1/.espressif/tools/...").
-  # Keep any idf.py/build commands INSIDE this same bash -c block --
-  # the PATH/function setup only exists within this subshell.
   bash -c '
     source "$1"
     export PATH="$(printf "%s" "$PATH" | sed -E "s#([^/])\.espressif/#\1/.espressif/#g")"
     idf.py --version
-  ' bash "$ACTIVATE_SCRIPT"
+  ' bash "$activate_script"
+}
 
-else
-  # ------------------------------------------------------------------------
-  # Legacy path (<5.0): eim is not supported for this version, so clone and
-  # bootstrap ESP-IDF directly with its own install.sh / export.sh scripts.
-  # ------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Legacy path (<5.0): eim is not supported for this version, so clone and
+# bootstrap ESP-IDF directly with its own install.sh / export.sh scripts.
+# ---------------------------------------------------------------------------
+install_with_legacy() {
   log "ESP-IDF ${ESP_IDF_VERSION} < v5.0 — EIM does not support this version; using legacy install (target: ${ESP_TARGET})"
 
-  IDF_TMP_DIR="/tmp/esp-idf-legacy/${ESP_IDF_VERSION}"
-  IDF_FINAL_DIR="${ESP_PATH}/${ESP_IDF_VERSION}"
+  local idf_tmp_dir="/tmp/esp-idf-legacy/${ESP_IDF_VERSION}"
+  local idf_final_dir="${ESP_PATH}/${ESP_IDF_VERSION}"
 
-  mkdir -p "$(dirname "$IDF_TMP_DIR")"
+  mkdir -p "$(dirname "$idf_tmp_dir")"
 
-  if [ -d "${IDF_TMP_DIR}/.git" ]; then
-    log "Existing clone found at ${IDF_TMP_DIR}, skipping clone"
+  if [ -d "${idf_tmp_dir}/.git" ]; then
+    log "Existing clone found at ${idf_tmp_dir}, skipping clone"
   else
     log "Cloning ESP-IDF ${ESP_IDF_VERSION}"
     git clone -b "${ESP_IDF_VERSION}" --recursive \
-      https://github.com/espressif/esp-idf.git "${IDF_TMP_DIR}"
+      https://github.com/espressif/esp-idf.git "${idf_tmp_dir}"
   fi
+
+  run_legacy_install_sh "$idf_tmp_dir"
+
+  log "Copying installed ESP-IDF into ${ESP_PATH}"
+  sudo cp -r "${idf_tmp_dir}" "${idf_final_dir}"
+  rm -rf "${idf_tmp_dir}"
+
+  # Set ownership of ESP-IDF installation dir to current user, now that
+  # the copy is complete
+  sudo chown -R "${USER}:${USER}" "${idf_final_dir}"
+
+  activate_legacy_env "$idf_final_dir"
+}
+
+# Runs the legacy install.sh, optionally forcing a specific Python
+# interpreter. install.sh detects its interpreter by running `which
+# python3`/`which python` — there's no clean env-var override for this in
+# old ESP-IDF versions. So if LEGACY_PYTHON_BIN differs from the default,
+# build a small shim directory with python3/python symlinks pointing at
+# it, and put that at the front of PATH for just this command.
+run_legacy_install_sh() {
+  local idf_tmp_dir="$1"
+  local shim_dir=""
 
   log "Running legacy install.sh (python: ${LEGACY_PYTHON_BIN})"
   (
-    cd "${IDF_TMP_DIR}"
+    cd "$idf_tmp_dir"
 
-    # install.sh detects its interpreter by running `which python3`/`which
-    # python` — there's no clean env-var override for this in old ESP-IDF
-    # versions. So if a specific interpreter was requested, build a small
-    # shim directory with python3/python symlinks pointing at it, and put
-    # that at the front of PATH for just this command.
     if [ "${LEGACY_PYTHON_BIN}" != "python3" ]; then
       resolved_python="$(command -v "${LEGACY_PYTHON_BIN}")" || {
         err "LEGACY_PYTHON_BIN '${LEGACY_PYTHON_BIN}' not found on PATH"
@@ -137,31 +160,46 @@ else
 
     ./install.sh "${ESP_TARGET}"
 
-    if [ -n "${shim_dir:-}" ]; then
-      rm -rf "${shim_dir}"
+    if [ -n "$shim_dir" ]; then
+      rm -rf "$shim_dir"
     fi
   )
+}
 
-  log "Copying installed ESP-IDF into ${ESP_PATH}"
-  sudo cp -r "${IDF_TMP_DIR}" "${IDF_FINAL_DIR}"
-  rm -rf "${IDF_TMP_DIR}"
-
-  # Set ownership of ESP-IDF installation dir to current user, now that
-  # the copy is complete
-  sudo chown -R "${USER}:${USER}" "${IDF_FINAL_DIR}"
+# Sources the legacy export.sh script and runs a smoke test.
+activate_legacy_env() {
+  local idf_final_dir="$1"
+  local export_script="${idf_final_dir}/export.sh"
 
   log "Activating the ESP-IDF ${ESP_IDF_VERSION} virtual environment (legacy export.sh)"
 
-  EXPORT_SCRIPT="${IDF_FINAL_DIR}/export.sh"
-  if [ ! -f "$EXPORT_SCRIPT" ]; then
-    err "Legacy export.sh not found: $EXPORT_SCRIPT"
+  if [ ! -f "$export_script" ]; then
+    err "Legacy export.sh not found: $export_script"
     exit 1
   fi
 
   bash -c '
     source "$1"
     idf.py --version
-  ' bash "$EXPORT_SCRIPT"
-fi
+  ' bash "$export_script"
+}
 
-log "Done."
+main() {
+  local idf_major
+  idf_major="$(get_idf_major_version "${ESP_IDF_VERSION}")"
+
+  # Add execute permissions to ESP-IDF installation scripts
+  sudo chmod -R +x scripts/esp-idf/
+
+  ensure_base_dir
+
+  if [ "$idf_major" -ge 5 ]; then
+    install_with_eim
+  else
+    install_with_legacy
+  fi
+
+  log "Done."
+}
+
+main "$@"
