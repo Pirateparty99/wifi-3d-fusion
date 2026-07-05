@@ -75,6 +75,25 @@ eim-esp-build() {
 
 # Legacy (<5.0) ESP-IDF build function
 legacy-esp-build () {
+    # legacy export.sh needs IDF_PATH set — derive it from ESP_PATH/ESP_IDF_VERSION
+    # (matching the layout the install script produces) unless it's already
+    # been set explicitly. Using ${VAR:-} throughout so this stays safe under
+    # `set -u` even when ESP_PATH/IDF_PATH aren't set at all.
+    if [ -z "${IDF_PATH:-}" ]; then
+        if [ -z "${ESP_PATH:-}" ]; then
+            err "Neither IDF_PATH nor ESP_PATH is set. Set one of them (or export"
+            err "IDF_PATH directly) before running legacy-esp-build."
+            exit 1
+        fi
+        export IDF_PATH="${ESP_PATH}/${ESP_IDF_VERSION}"
+    fi
+
+    if [ ! -f "${IDF_PATH}/export.sh" ]; then
+        err "export.sh not found at '${IDF_PATH}/export.sh'."
+        err "Check that ESP_PATH and ESP_IDF_VERSION are set correctly, or set IDF_PATH directly."
+        exit 1
+    fi
+
     bash -c '
         set -euo pipefail
 
