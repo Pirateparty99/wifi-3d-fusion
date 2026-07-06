@@ -14,7 +14,7 @@ export ESP_IDF_VERSION="v4.3.7"
 export LEGACY_PYTHON_BIN=python3.9 
 
 # Set the board target for installing the board-specific toolchain(s) with ESP-IDF
-export ESP_TARGET=esp32,esp32c6  # multiple targets
+export ESP_TARGET=esp32,esp32c3  # multiple targets
 
 
 # Install the ESP-IDF if it is not found locally
