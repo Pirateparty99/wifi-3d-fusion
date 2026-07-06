@@ -161,6 +161,11 @@ install_with_eim() {
   # sudo cp -r /root/.espressif/ ~/
 
   activate_eim_env
+
+  # Install ESP-IDF tools
+  echo "Installing ESP-IDF tools"
+  ${ESP_PATH}/${ESP_IDF_VERSION}/install.sh
+  
 }
 
 # Sources the eim-generated activate_idf_*.sh script and runs a smoke test.
@@ -224,6 +229,11 @@ install_with_legacy() {
   sudo chown -R "${USER}:${USER}" "${idf_final_dir}"
 
   activate_legacy_env "$idf_final_dir"
+
+  # Install ESP-IDF tools
+  echo "Installing ESP-IDF tools"
+  ${ESP_PATH}/${ESP_IDF_VERSION}/install.sh
+
 }
 
 # Runs the legacy install.sh, optionally forcing a specific Python
