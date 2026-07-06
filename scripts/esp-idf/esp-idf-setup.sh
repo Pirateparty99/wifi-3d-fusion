@@ -19,6 +19,30 @@ log() { printf '\033[1;34m[esp-build]\033[0m %s\n' "$1"; }
 err() { printf '\033[1;31m[esp-build]\033[0m %s\n' "$1" >&2; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# A venv records the exact path used to invoke it as its own interpreter
+# symlink target — NOT the fully-resolved real binary underneath. So the
+# python3/python shim used to bootstrap install.sh must live at a STABLE
+# path that's never deleted; otherwise the venv created through it breaks
+# permanently once that path goes away (its bin/python becomes a dangling
+# symlink). This directory is created once and left in place indefinitely.
+PYTHON_SHIM_DIR="${PYTHON_SHIM_DIR:-$HOME/.esp-idf-python-shim}"
+
+# Ensures PYTHON_SHIM_DIR exists with python3/python symlinks pointing at
+# LEGACY_PYTHON_BIN, and prints its path. Idempotent — safe to call
+# repeatedly; only rewrites the symlinks if they're missing or stale.
+ensure_python_shim() {
+  local resolved_python
+  resolved_python="$(command -v "${LEGACY_PYTHON_BIN}")" || {
+    err "LEGACY_PYTHON_BIN '${LEGACY_PYTHON_BIN}' not found on PATH"
+    exit 1
+  }
+
+  mkdir -p "${PYTHON_SHIM_DIR}"
+  ln -sf "${resolved_python}" "${PYTHON_SHIM_DIR}/python3"
+  ln -sf "${resolved_python}" "${PYTHON_SHIM_DIR}/python"
+  echo "${PYTHON_SHIM_DIR}"
+}
+
 # Ensures LEGACY_PYTHON_BIN is installed, installing it via the detected OS
 # package manager if it's missing. Currently only knows how to install
 # python3.9 specifically (apt: deadsnakes PPA, dnf: package name
@@ -210,29 +234,18 @@ install_with_legacy() {
 # it, and put that at the front of PATH for just this command.
 run_legacy_install_sh() {
   local idf_tmp_dir="$1"
-  local shim_dir=""
 
   log "Running legacy install.sh (python: ${LEGACY_PYTHON_BIN})"
   (
     cd "$idf_tmp_dir"
 
     if [ "${LEGACY_PYTHON_BIN}" != "python3" ]; then
-      resolved_python="$(command -v "${LEGACY_PYTHON_BIN}")" || {
-        err "LEGACY_PYTHON_BIN '${LEGACY_PYTHON_BIN}' not found on PATH"
-        exit 1
-      }
-      shim_dir="$(mktemp -d)"
-      ln -s "${resolved_python}" "${shim_dir}/python3"
-      ln -s "${resolved_python}" "${shim_dir}/python"
+      shim_dir="$(ensure_python_shim)"
       export PATH="${shim_dir}:${PATH}"
-      log "Using ${resolved_python} for install.sh (via PATH shim)"
+      log "Using $(command -v "${LEGACY_PYTHON_BIN}") for install.sh (via persistent PATH shim at ${shim_dir})"
     fi
 
     ./install.sh "${ESP_TARGET}"
-
-    if [ -n "$shim_dir" ]; then
-      rm -rf "$shim_dir"
-    fi
   )
 }
 
@@ -249,9 +262,12 @@ activate_legacy_env() {
   fi
 
   bash -c '
+    if [ -d "$2" ]; then
+      export PATH="$2:$PATH"
+    fi
     source "$1"
     idf.py --version
-  ' bash "$export_script"
+  ' bash "$export_script" "$PYTHON_SHIM_DIR"
 }
 
 main() {
