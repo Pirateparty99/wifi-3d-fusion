@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 
+# Optional: LEGACY_PYTHON_BIN — must match whatever Python interpreter was
+# used to build the venv during legacy install (defaults to "python3.9",
+# matching the install script's default). Old ESP-IDF's export.sh
+# re-derives which venv to activate from whatever python3/python resolve
+# to on PATH *at the moment it's sourced* — it does not remember what was
+# used at install time. So this same interpreter has to be made resolvable
+# again here, not just during install.
+LEGACY_PYTHON_BIN="${LEGACY_PYTHON_BIN:-python3.9}"
+export LEGACY_PYTHON_BIN
+PYTHON_SHIM_DIR="${PYTHON_SHIM_DIR:-$HOME/.esp-idf-python-shim}"
+export PYTHON_SHIM_DIR
+
 err() { printf '\033[1;31m[esp-build]\033[0m %s\n' "$1" >&2; }
+have() { command -v "$1" >/dev/null 2>&1; }
 
 # Prints a build-success message and how to flash the just-built firmware.
 # Exported so it's callable from inside the bash -c subshells below (a
@@ -53,34 +66,22 @@ print_build_success() {
 }
 export -f print_build_success
 
-activate_eim_env() {
-  echo "Activating the ESP-IDF ${ESP_IDF_VERSION} virtual environment"
-
-  local activate_script="$HOME/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh"
-  if [ ! -f "$activate_script" ]; then
-    err "Activation script not found: $activate_script"
-    exit 1
-  fi
-
-  bash -c '
-    source "$1"
-    export PATH="$(printf "%s" "$PATH" | sed -E "s#([^/])\.espressif/#\1/.espressif/#g")"
-    idf.py --version
-  ' bash "$activate_script"
-}
-
 # EIM-installed ESP-IDF build function
 eim-esp-build() {
-
-    # Export the venv activation function to allow subshell to call it
-    export -f activate_eim_env
-
     bash -c '
         set -euo pipefail
 
-        activate_eim_env
+        activate_script="$HOME/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh"
+        if [ ! -f "$activate_script" ]; then
+            echo "Activation script not found: $activate_script" >&2
+            exit 1
+        fi
 
-        source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh
+        source "$activate_script"
+
+        # Fix a known typo in the generated PATH entries (missing "/"
+        # between "$HOME" and ".espressif").
+        export PATH="$(printf "%s" "$PATH" | sed -E "s#([^/])\.espressif/#\1/.espressif/#g")"
 
         echo "Configuring ESP-IDF to connect to ESP32"
 
@@ -93,24 +94,6 @@ eim-esp-build() {
 
         print_build_success
     ' bash
-}
-
-# Sources the legacy export.sh script and runs a smoke test.
-activate_legacy_env() {
-  local idf_final_dir="$1"
-  local export_script="${idf_final_dir}/export.sh"
-
-  echo "Activating the ESP-IDF ${ESP_IDF_VERSION} virtual environment (legacy export.sh)"
-
-  if [ ! -f "$export_script" ]; then
-    err "Legacy export.sh not found: $export_script"
-    exit 1
-  fi
-
-  bash -c '
-    source "$1"
-    idf.py --version
-  ' bash "$export_script"
 }
 
 # Legacy (<5.0) ESP-IDF build function
@@ -134,16 +117,24 @@ legacy-esp-build () {
         exit 1
     fi
 
-    # Export the venv activation function to allow subshell to call it
-    export -f activate_legacy_env
-
     bash -c '
         set -euo pipefail
 
-        # Source the legacy ESP-IDF venv
-
-        idf_final_dir="${ESP_PATH}/${ESP_IDF_VERSION}"
-        activate_legacy_env "$idf_final_dir"
+        # Re-apply the same persistent Python shim used during install (see
+        # esp-build.sh). export.sh derives which venv to activate from
+        # whatever python3/python resolve to right now, and the venv itself
+        # only works when invoked via the exact path it was created
+        # through — so this must be the SAME stable shim directory used at
+        # install time, not a fresh throwaway one.
+        if [ "${LEGACY_PYTHON_BIN}" != "python3" ]; then
+            shim_dir="${PYTHON_SHIM_DIR:-$HOME/.esp-idf-python-shim}"
+            if [ ! -e "${shim_dir}/python3" ]; then
+                echo "Expected Python shim not found at ${shim_dir}/python3." >&2
+                echo "Re-run the install script first so it can be created." >&2
+                exit 1
+            fi
+            export PATH="${shim_dir}:${PATH}"
+        fi
 
         source "${IDF_PATH}/export.sh"
 
@@ -174,11 +165,7 @@ get_idf_major_version() {
 
 
 main() {
-    # Source the ESP-IDF venv
     echo "Sourcing ESP-IDF version ${ESP_IDF_VERSION}"
-    # source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh
-    # bash -c 'source ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh && idf.py build' bash
-    # eval "$(sh ~/.espressif/tools/activate_idf_${ESP_IDF_VERSION}.sh -e)"
 
     set -euo pipefail
 
@@ -189,21 +176,15 @@ main() {
 
     # Clone repo if it does not exist
     if [ ! -d "third_party/esp32-csi-toolkit" ]; then
-
         echo "Cloning the ESP32 CSI Toolkit repo"
-
         git clone https://github.com/StevenMHernandez/ESP32-CSI-Tool "third_party/esp32-csi-toolkit"
-
     else
         echo "ESP32 CSI Toolkit repo already cloned, continuing"
-    fi 
+    fi
 
     cd "third_party/esp32-csi-toolkit/passive" # For Passive CSI collection (Used as a passive-RX)
 
-    # Configure the connection settings for the ESP-IDF
-
     # Run ESP build based on installed ESP-IDF version
-
     if [ "$idf_major" -ge 5 ]; then
         eim-esp-build
     else
