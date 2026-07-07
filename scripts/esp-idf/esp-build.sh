@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+# Resolve the script's own directory before we cd elsewhere, so the
+# templates/ path stays correct regardless of build function's cwd.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export SCRIPT_DIR
+
 # Optional: LEGACY_PYTHON_BIN — must match whatever Python interpreter was
 # used to build the venv during legacy install (defaults to "python3.9",
 # matching the install script's default). Old ESP-IDF's export.sh
@@ -14,6 +19,36 @@ export PYTHON_SHIM_DIR
 
 err() { printf '\033[1;31m[esp-build]\033[0m %s\n' "$1" >&2; }
 have() { command -v "$1" >/dev/null 2>&1; }
+export -f err
+export -f have
+
+# Copies templates/sdkconfig.defaults, translating it into the format
+# ESP-IDF's Kconfig actually reads (CONFIG_ prefix, y/n booleans), then
+# clears any stale sdkconfig and runs `idf.py reconfigure` so the new
+# defaults take effect. Replaces the old `idf.py menuconfig` step.
+copy_sdkconfig_template() {
+    local template="${SCRIPT_DIR}/templates/sdkconfig.defaults"
+
+    if [ ! -f "$template" ]; then
+        err "Template config not found at: $template"
+        exit 1
+    fi
+
+    # Drop any existing sdkconfig -- reconfigure only fills in defaults
+    # for keys NOT already present in sdkconfig, so a stale one would
+    # shadow the values we're trying to set.
+    rm -f sdkconfig
+
+    # Translate: skip blank lines, add CONFIG_ prefix, true/false -> y/n.
+    grep -v '^[[:space:]]*$' "$template" \
+        | sed -E 's/^/CONFIG_/; s/=true$/=y/; s/=false$/=n/' \
+        > sdkconfig.defaults
+
+    echo "Generated sdkconfig.defaults from template"
+
+    idf.py reconfigure
+}
+export -f copy_sdkconfig_template
 
 # Prints a build-success message and how to flash the just-built firmware.
 # Exported so it's callable from inside the bash -c subshells below (a
@@ -85,7 +120,7 @@ eim-esp-build() {
 
         echo "Configuring ESP-IDF to connect to ESP32"
 
-        idf.py menuconfig
+        copy_sdkconfig_template
         idf.py set-target esp32
 
         # Build the firmware
@@ -140,8 +175,8 @@ legacy-esp-build () {
 
         echo "Configuring ESP-IDF to connect to ESP32"
 
-        idf.py menuconfig
         idf.py set-target esp32
+        copy_sdkconfig_template
 
         # Build the firmware
         echo "Building firmware"
