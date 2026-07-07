@@ -22,12 +22,15 @@ have() { command -v "$1" >/dev/null 2>&1; }
 export -f err
 export -f have
 
-# Copies templates/sdkconfig.defaults, translating it into the format
+# Copies templates/sdkconfig.defaults from the project root (two
+# directories up from this script), translating it into the format
 # ESP-IDF's Kconfig actually reads (CONFIG_ prefix, y/n booleans), then
 # clears any stale sdkconfig and runs `idf.py reconfigure` so the new
 # defaults take effect. Replaces the old `idf.py menuconfig` step.
 copy_sdkconfig_template() {
-    local template="${SCRIPT_DIR}/templates/sdkconfig.defaults"
+    local project_root
+    project_root="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+    local template="${project_root}/templates/sdkconfig.defaults"
 
     if [ ! -f "$template" ]; then
         err "Template config not found at: $template"
@@ -44,7 +47,7 @@ copy_sdkconfig_template() {
         | sed -E 's/^/CONFIG_/; s/=true$/=y/; s/=false$/=n/' \
         > sdkconfig.defaults
 
-    echo "Generated sdkconfig.defaults from template"
+    echo "Generated sdkconfig.defaults from template at $template"
 
     idf.py reconfigure
 }
