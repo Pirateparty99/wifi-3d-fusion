@@ -46,3 +46,4 @@ src/pipeline/realtime_viewer_hacker.py
 
 # ESP-related files
 eim_config.toml
+third_party/esp32-csi-toolkit
