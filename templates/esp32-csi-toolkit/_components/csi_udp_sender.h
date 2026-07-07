@@ -7,27 +7,23 @@
 #include "lwip/sockets.h"
 #include "sdkconfig.h"
 
-// Header-only by design, matching this project's existing _components
-// pattern (csi_component.h, time_component.h, etc. all put function
-// bodies directly in the header). This means no CMakeLists.txt edit is
-// needed to add a source file -- it just gets #include'd into main.cc's
-// single translation unit.
-//
-// `static` linkage is intentional: if this header is ever included from
-// more than one .cc file, each translation unit gets its own private
-// copy of these globals/functions rather than colliding at link time.
+// Fallback defaults so this header compiles cleanly even in projects/
+// configs where SEND_CSI_TO_UDP isn't defined (e.g. `passive`, or
+// `active_sta` builds with the UDP option turned off). The functions
+// below are still only ever *called* from behind `#if CONFIG_SEND_CSI_TO_UDP`
+// guards at the call sites in csi_component.h / main.cc -- these defaults
+// just let the header parse/compile in isolation.
+#ifndef CONFIG_UDP_TARGET_IP
+#define CONFIG_UDP_TARGET_IP "0.0.0.0"
+#endif
+#ifndef CONFIG_UDP_TARGET_PORT
+#define CONFIG_UDP_TARGET_PORT 0
+#endif
 
 static const char *CSI_UDP_TAG = "csi_udp";
 static int csi_udp_sock = -1;
 static struct sockaddr_in csi_udp_dest_addr;
 
-// _parse_esp32_json() on the wifi-3d-fusion host reshapes the raw buffer
-// into (N/2, 2) I/Q pairs itself -- we forward data->buf verbatim as a
-// flat int list, no amplitude/phase computation here.
-//
-// Cap chosen to stay under the ~2000-byte UDP MTU the host listens with.
-// If SHOULD_COLLECT_ONLY_LLTF=n (HT-LTF/STBC included, larger buffers),
-// raise CSI_UDP_JSON_BUF_SIZE and re-check this cap.
 #define CSI_UDP_MAX_VALUES    256
 #define CSI_UDP_JSON_BUF_SIZE 2048
 
@@ -54,7 +50,7 @@ static inline void csi_udp_sender_init(void) {
 
 static inline void csi_udp_sender_send(const wifi_csi_info_t *data) {
     if (csi_udp_sock < 0) {
-        return; // init() wasn't called yet, or socket() failed
+        return;
     }
 
     static char json_buf[CSI_UDP_JSON_BUF_SIZE];
@@ -65,8 +61,6 @@ static inline void csi_udp_sender_send(const wifi_csi_info_t *data) {
         n = CSI_UDP_MAX_VALUES;
     }
 
-    // type MUST start with "CSI" (case-insensitive) -- the host's
-    // _parse_esp32_json discards anything else.
     offset += snprintf(json_buf + offset, CSI_UDP_JSON_BUF_SIZE - offset,
         "{\"type\":\"CSI_DATA\",\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\","
         "\"rssi\":%d,\"len\":%d,\"csi\":[",
