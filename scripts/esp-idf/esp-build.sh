@@ -5,6 +5,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SCRIPT_DIR
 
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+export PROJECT_ROOT
+
 # Optional: LEGACY_PYTHON_BIN — must match whatever Python interpreter was
 # used to build the venv during legacy install (defaults to "python3.9",
 # matching the install script's default). Old ESP-IDF's export.sh
@@ -28,21 +31,15 @@ export -f have
 # clears any stale sdkconfig and runs `idf.py reconfigure` so the new
 # defaults take effect. Replaces the old `idf.py menuconfig` step.
 copy_sdkconfig_template() {
-    local project_root
-    project_root="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-    local template="${project_root}/templates/sdkconfig.defaults"
+    local template="${PROJECT_ROOT}/templates/sdkconfig.defaults"
 
     if [ ! -f "$template" ]; then
         err "Template config not found at: $template"
         exit 1
     fi
 
-    # Drop any existing sdkconfig -- reconfigure only fills in defaults
-    # for keys NOT already present in sdkconfig, so a stale one would
-    # shadow the values we're trying to set.
     rm -f sdkconfig
 
-    # Translate: skip blank lines, add CONFIG_ prefix, true/false -> y/n.
     grep -v '^[[:space:]]*$' "$template" \
         | sed -E 's/^/CONFIG_/; s/=true$/=y/; s/=false$/=n/' \
         > sdkconfig.defaults
@@ -252,7 +249,7 @@ main() {
 
     # Apply overlay every run, so template edits always take effect
     # without needing to delete/re-clone third_party/esp32-csi-toolkit.
-    apply_toolkit_overlay "${SCRIPT_DIR}/templates" "third_party/esp32-csi-toolkit"
+    apply_toolkit_overlay "${PROJECT_ROOT}/templates" "third_party/esp32-csi-toolkit"
 
     cd "third_party/esp32-csi-toolkit/active_sta" # UDP forwarding requires a real STA connection with an IP
 
