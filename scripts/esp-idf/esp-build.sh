@@ -201,6 +201,36 @@ get_idf_major_version() {
   echo "$major"
 }
 
+# Copies our modified template files over the freshly-cloned third-party
+# toolkit repo. Runs every build (not just on first clone) so re-running
+# the script always re-applies the overlay, even after a `git pull` or
+# re-clone of third_party/esp32-csi-toolkit.
+apply_toolkit_overlay() {
+    local template_root="${1}"
+    local repo_root="${2}"
+
+    local files=(
+        "_components/csi_component.h"
+        "_components/csi_udp_sender.h"
+        "active_sta/main/main.cc"
+        "active_sta/main/Kconfig.projbuild"
+    )
+
+    for rel_path in "${files[@]}"; do
+        local src="${template_root}/esp32-csi-toolkit/${rel_path}"
+        local dest="${repo_root}/${rel_path}"
+
+        if [ ! -f "$src" ]; then
+            err "Overlay template not found: $src"
+            exit 1
+        fi
+
+        mkdir -p "$(dirname "$dest")"
+        cp "$src" "$dest"
+        echo "Applied overlay: ${rel_path}"
+    done
+}
+export -f apply_toolkit_overlay
 
 main() {
     echo "Sourcing ESP-IDF version ${ESP_IDF_VERSION}"
@@ -212,7 +242,7 @@ main() {
 
     # ESP-CSI Toolkit firmware build script
 
-    # Clone repo if it does not exist
+   # Clone repo if it does not exist
     if [ ! -d "third_party/esp32-csi-toolkit" ]; then
         echo "Cloning the ESP32 CSI Toolkit repo"
         git clone https://github.com/StevenMHernandez/ESP32-CSI-Tool "third_party/esp32-csi-toolkit"
@@ -220,7 +250,11 @@ main() {
         echo "ESP32 CSI Toolkit repo already cloned, continuing"
     fi
 
-    cd "third_party/esp32-csi-toolkit/passive" # For Passive CSI collection (Used as a passive-RX)
+    # Apply overlay every run, so template edits always take effect
+    # without needing to delete/re-clone third_party/esp32-csi-toolkit.
+    apply_toolkit_overlay "${SCRIPT_DIR}/templates" "third_party/esp32-csi-toolkit"
+
+    cd "third_party/esp32-csi-toolkit/active_sta" # UDP forwarding requires a real STA connection with an IP
 
     # Run ESP build based on installed ESP-IDF version
     if [ "$idf_major" -ge 5 ]; then
