@@ -25,6 +25,8 @@ import http.server
 import socketserver
 from datetime import datetime
 
+from src.csi_sources.esp32_udp import ESP32UDPCSISource
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -1111,6 +1113,55 @@ class MonitorRadiotapSource:
                 logger.warning("⚠️ CSI capture thread did not terminate cleanly")
             self.thread = None
 
+class ESP32CSISourceAdapter:
+    """Wraps ESP32UDPCSISource to match the register_callback/start/stop
+    interface that the rest of run_js_visualizer.py expects."""
+
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config if isinstance(config, dict) else {}
+        self.port = self.config.get("port", 5566)
+        self.bind = self.config.get("bind", "0.0.0.0")
+        self.mtu = self.config.get("mtu", 2000)
+
+        self._esp32_source = ESP32UDPCSISource(port=self.port, mtu=self.mtu, bind=self.bind)
+        self.callbacks = []
+        self.running = False
+        self._thread = None
+
+    def register_callback(self, callback):
+        """Register a callback to be called when a new frame is available"""
+        self.callbacks.append(callback)
+
+    def _run(self):
+        try:
+            for ts, csi_vector in self._esp32_source.frames():
+                if not self.running:
+                    break
+                for callback in self.callbacks:
+                    try:
+                        callback(csi_vector)
+                    except Exception as e:
+                        logger.error(f"❌ Error in ESP32 CSI callback: {e}")
+        except Exception as e:
+            # Socket close during shutdown raises here too — harmless if self.running is False
+            if self.running:
+                logger.error(f"❌ ESP32 UDP source thread crashed: {e}")
+
+    def start(self):
+        if self.running:
+            return
+        self.running = True
+        self._esp32_source.start()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        logger.info(f"✅ ESP32 CSI source started, listening on {self.bind}:{self.port}")
+
+    def stop(self):
+        self.running = False
+        self._esp32_source.stop()
+        if self._thread:
+            self._thread.join(timeout=2.0)
+
 class WiFi3DFusion:
     """Main WiFi-3D-Fusion application with JavaScript visualization"""
     
@@ -1158,10 +1209,7 @@ class WiFi3DFusion:
             self.csi_source = MonitorRadiotapSource(source_config)
         elif source_type == "esp32":
             logger.info("📡 Using ESP32 CSI source")
-            # This is a placeholder - we would implement ESP32CSISource in a full implementation
-            # For now, fallback to MonitorRadiotapSource
-            logger.warning("⚠️ ESP32 CSI source not fully implemented, using MonitorRadiotapSource")
-            self.csi_source = MonitorRadiotapSource(source_config)
+            self.csi_source = ESP32CSISourceAdapter(source_config)
         else:
             logger.warning(f"⚠️ Unknown source type: {source_type}, falling back to dummy data")
             self.csi_source = MonitorRadiotapSource({"use_dummy_data": True})
