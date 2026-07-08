@@ -423,8 +423,12 @@ class ReIDBridge:
         self.enrollment_threshold = config.get("enrollment_threshold", 0.7)
         self.continuous_learning = config.get("continuous_learning", True)
         
-        # Force initial training
-        self._force_training()
+        # Force initial training (skip for real sources - synthetic
+        # baseline identities don't match real feature vector distributions)
+        if config.get("skip_synthetic_pretraining", False):
+            logger.info("🎓 Skipping synthetic pretraining (real CSI source in use)")
+        else:
+            self._force_training()
     
     def _force_training(self):
         """Force initial training with synthetic data"""
@@ -893,8 +897,8 @@ class WebVisualizer:
                 # For direct paths to files in visualization_path
                 if path == os.path.join(os.getcwd()) or path == os.getcwd():
                     return os.path.join(self.visualization_path)
-                    
-                    return path
+                
+                return path
         
         # Allow address reuse to avoid "Address already in use" errors
         socketserver.TCPServer.allow_reuse_address = True
@@ -1182,6 +1186,9 @@ class WiFi3DFusion:
         
         # Create components
         self.csi_processor = CSIDataProcessor(self.config.get("processor", {}))
+        reid_config = self.config.get("reid", {})
+        if self.config.get("source", {}).get("type") == "esp32":
+            reid_config["skip_synthetic_pretraining"] = True
         self.reid_bridge = ReIDBridge(self.config.get("reid", {}))
         self.visualizer = WebVisualizer(self.config.get("port", DEFAULT_PORT))
         
@@ -1275,9 +1282,33 @@ class WiFi3DFusion:
             try:
                 # Generate feature vector from signal characteristics
                 feature_dims = 32  # Fixed to 32 to avoid dimension mismatch
-                feature_vector = np.random.normal(0, 1, size=(feature_dims,))
-                feature_vector[0] = signal_variance
-                feature_vector[1] = processed_data["environment"]["activity"]
+
+                if isinstance(csi_frame, np.ndarray) and csi_frame.size > 0:
+                    # Real CSI data available (e.g. ESP32): derive a stable
+                    # feature vector from the actual amplitude profile instead
+                    # of random noise, so the same physical scene produces a
+                    # similar vector across frames.
+                    amp = np.abs(csi_frame).astype(np.float32)
+                    n = (amp.size // feature_dims) * feature_dims
+                    if n > 0:
+                        feature_vector = amp[:n].reshape(feature_dims, -1).mean(axis=1)
+                    else:
+                        feature_vector = np.zeros(feature_dims, dtype=np.float32)
+                        feature_vector[:amp.size] = amp
+
+                    # Normalize so cosine similarity reflects shape, not raw scale
+                    norm = np.linalg.norm(feature_vector)
+                    if norm > 0:
+                        feature_vector = feature_vector / norm
+
+                    # Small jitter so multiple simultaneous "persons" aren't
+                    # bit-for-bit identical, without masking the real signal
+                    feature_vector = feature_vector + np.random.normal(0, 0.01, size=feature_dims)
+                else:
+                    # No raw array available (dummy/monitor/nexmon) - unchanged behavior
+                    feature_vector = np.random.normal(0, 1, size=(feature_dims,))
+                    feature_vector[0] = signal_variance
+                    feature_vector[1] = processed_data["environment"]["activity"]
                 
                 # Identify person
                 person_id, confidence = self.reid_bridge.identify(feature_vector)
